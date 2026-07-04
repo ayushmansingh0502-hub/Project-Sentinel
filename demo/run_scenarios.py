@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List
 
-from fastapi.testclient import TestClient
+import httpx
+from asgi_lifespan import LifespanManager
 
+from event_queue import event_queue
 from main import app
 from storage import get_audit_log, list_incidents, reset_runtime_state
 
@@ -32,12 +35,21 @@ def load_scenarios() -> List[Dict[str, Any]]:
     return scenarios
 
 
-def _run_step(client: TestClient, step: Dict[str, Any]) -> Dict[str, Any]:
+async def wait_for_queue():
+    while event_queue.metrics.depth > 0:
+        await asyncio.sleep(0.05)
+    await asyncio.sleep(0.1)  # small buffer for final incident correlation
+
+async def _run_step(client: httpx.AsyncClient, step: Dict[str, Any]) -> Dict[str, Any]:
     kind = step["kind"]
     if kind == "telemetry":
-        return client.post("/telemetry", json=step["body"], headers=API_HEADERS).json()
+        resp = await client.post("/telemetry", json=step["body"], headers=API_HEADERS)
+        await wait_for_queue()
+        return resp.json()
     if kind == "honeypot":
-        return client.post("/honeypot", json=step["body"], headers=API_HEADERS).json()
+        resp = await client.post("/honeypot", json=step["body"], headers=API_HEADERS)
+        await wait_for_queue()
+        return resp.json()
     if kind == "action":
         incident_id = step["incident_id"]
         if incident_id == "latest":
@@ -45,15 +57,16 @@ def _run_step(client: TestClient, step: Dict[str, Any]) -> Dict[str, Any]:
             if not incidents:
                 return {"skipped": True, "reason": "no incidents available"}
             incident_id = incidents[-1]["id"]
-        return client.post(
+        resp = await client.post(
             f"/incidents/{incident_id}/action",
             json=step["body"],
             headers=API_HEADERS,
-        ).json()
+        )
+        return resp.json()
     raise ValueError(f"unsupported step kind: {kind}")
 
 
-def run_scenario(client: TestClient, scenario: Dict[str, Any]) -> Dict[str, Any]:
+async def run_scenario(client: httpx.AsyncClient, scenario: Dict[str, Any]) -> Dict[str, Any]:
     reset_runtime_state()
     scenario_start = time.time()
     first_detection_at = None
@@ -61,7 +74,7 @@ def run_scenario(client: TestClient, scenario: Dict[str, Any]) -> Dict[str, Any]
     responses: List[Dict[str, Any]] = []
 
     for step in scenario.get("steps", []):
-        response = _run_step(client, step)
+        response = await _run_step(client, step)
         responses.append({"kind": step["kind"], "response": response})
         incidents = list_incidents()
         if first_detection_at is None and incidents:
@@ -121,10 +134,20 @@ def write_metrics(summary: Dict[str, Any]) -> Path:
     return output_path
 
 
-def run_all_scenarios() -> Dict[str, Any]:
+async def run_all_scenarios() -> Dict[str, Any]:
     scenarios = load_scenarios()
-    with TestClient(app) as client:
-        results = [run_scenario(client, scenario) for scenario in scenarios]
+    
+    # We must use LifespanManager to ensure the FastAPI lifespan (which starts the queue) runs
+    async with LifespanManager(app):
+        # We need to hit the app directly. httpx can do this with ASGITransport in recent versions,
+        # or we use the old 'app' parameter. 
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            results = []
+            for scenario in scenarios:
+                res = await run_scenario(client, scenario)
+                results.append(res)
+                
     summary = summarize_results(results)
     output_path = write_metrics(summary)
     summary["output_path"] = str(output_path)
@@ -132,5 +155,5 @@ def run_all_scenarios() -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    metrics = run_all_scenarios()
+    metrics = asyncio.run(run_all_scenarios())
     print(json.dumps(metrics, indent=2))
