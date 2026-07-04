@@ -55,7 +55,7 @@ python test_local.py
    ```
    GOOGLE_AI_STUDIO_KEY=YOUR_GOOGLE_AI_STUDIO_KEY_HERE
    REDIS_URL=redis://...
-   API_KEY=hackathon-secret-key
+   API_KEY=YOUR_API_KEY_HERE
    ```
 
 7. Click "Deploy"
@@ -66,7 +66,7 @@ Wait 2-3 minutes for deployment, then:
 
 ```bash
 curl -X POST https://YOUR-APP.onrender.com/honeypot \
-  -H "x-api-key: hackathon-secret-key" \
+   -H "x-api-key: YOUR_API_KEY_HERE" \
   -H "Content-Type: application/json" \
   -d '{"conversation_id": "test-001", "message": "Your account is blocked"}'
 ```
@@ -93,7 +93,7 @@ You should get a response with a contextual reply!
 - Check REDIS_URL format: `redis://default:password@host:port`
 
 **Still stuck?**
-- See `DEPLOYMENT_GUIDE.md` for detailed help
+- See [deployment_guide.md](deployment_guide.md) for detailed help
 
 ---
 **Done!** Your honeypot is live and free! 🎉

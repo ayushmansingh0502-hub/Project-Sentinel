@@ -108,7 +108,7 @@ Appears at top of Gmail email with:
 
 ### Backend Configuration
 - **API Base:** `https://web-production-b7ac.up.railway.app`
-- **API Key:** `hackathon-secret-key`
+- **API Key:** Set your own key in extension settings
 - **Endpoints:**
   - `POST /analyze-email` - Analyze single email
   - `GET /admin/flagged-intelligence` - Get flagged stats
@@ -121,7 +121,7 @@ POST https://web-production-b7ac.up.railway.app/analyze-email
 
 Headers:
   Content-Type: application/json
-  x-api-key: hackathon-secret-key
+  x-api-key: YOUR_API_KEY_HERE
 
 Body:
 {
@@ -159,7 +159,7 @@ Response:
 GET https://web-production-b7ac.up.railway.app/admin/flagged-intelligence
 
 Headers:
-  x-api-key: hackathon-secret-key
+  x-api-key: YOUR_API_KEY_HERE
 
 Response:
 {
@@ -204,7 +204,7 @@ Response:
 ✅ Check:
 - Internet connection is working
 - Backend server is online
-- API key is correct in `background.js`
+- API key is set in extension popup settings
 - Rate limits aren't exceeded
 
 ### Popup shows no stats

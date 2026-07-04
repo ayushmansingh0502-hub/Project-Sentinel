@@ -5,7 +5,9 @@ console.log("📋 Popup initialized");
 document.addEventListener('DOMContentLoaded', () => {
   loadFlaggedStats();
   loadSettings();
+  loadApiSettings();
   setupToggleButtons();
+  setupApiSettings();
 });
 
 /**
@@ -16,6 +18,7 @@ function loadFlaggedStats() {
     { action: "getFlaggedStats" },
     (response) => {
       if (response.success) {
+        document.getElementById('api-warning').style.display = 'none';
         const stats = response.data;
         document.getElementById('stat-upi').textContent = stats.flagged_upi_ids_count || 0;
         document.getElementById('stat-accounts').textContent = stats.flagged_bank_accounts_count || 0;
@@ -23,6 +26,9 @@ function loadFlaggedStats() {
         document.getElementById('stat-total').textContent = stats.total_flagged || 0;
       } else {
         console.error("Failed to load stats:", response.error);
+        if (response.error && response.error.includes("API key is not configured")) {
+          document.getElementById('api-warning').style.display = 'block';
+        }
         // Show error but don't break the UI
         document.getElementById('stat-total').textContent = "Error";
       }
@@ -40,6 +46,52 @@ function loadSettings() {
     
     setToggleState('toggle-auto-analyze', autoAnalyze);
     setToggleState('toggle-highlight', highlight);
+  });
+}
+
+function loadApiSettings() {
+  chrome.storage.sync.get(['apiBase', 'apiKey'], (items) => {
+    const baseInput = document.getElementById('api-base');
+    const keyInput = document.getElementById('api-key');
+    if (baseInput) baseInput.value = items.apiBase || 'http://localhost:8000';
+    if (keyInput) keyInput.value = items.apiKey || '';
+    
+    if (!items.apiKey) {
+      document.getElementById('api-warning').style.display = 'block';
+    }
+  });
+}
+
+function setupApiSettings() {
+  const saveButton = document.getElementById('save-api-settings');
+  if (!saveButton) return;
+
+  saveButton.addEventListener('click', () => {
+    const apiBase = (document.getElementById('api-base')?.value || '').trim();
+    const apiKey = (document.getElementById('api-key')?.value || '').trim();
+    const status = document.getElementById('api-save-status');
+
+    if (!apiBase || !apiKey) {
+      if (status) {
+        status.style.display = 'block';
+        status.className = 'alert alert-error';
+        status.textContent = 'Both API base and API key are required';
+      }
+      return;
+    }
+
+    chrome.storage.sync.set({ apiBase, apiKey }, () => {
+      document.getElementById('api-warning').style.display = 'none';
+      if (status) {
+        status.style.display = 'block';
+        status.className = 'alert alert-success';
+        status.textContent = 'Settings saved';
+      }
+      setTimeout(() => {
+        if (status) status.style.display = 'none';
+      }, 2000);
+      loadFlaggedStats();
+    });
   });
 }
 

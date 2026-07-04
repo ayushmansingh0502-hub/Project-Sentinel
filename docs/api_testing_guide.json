@@ -6,7 +6,7 @@
   },
   
   "REQUIRED_HEADERS": {
-    "x-api-key": "hackathon-secret-key",
+    "x-api-key": "YOUR_API_KEY_HERE",
     "Content-Type": "application/json"
   },
 
@@ -68,7 +68,7 @@
         "method": "GET",
         "url": "https://web-production-b7ac.up.railway.app/admin/flagged-intelligence",
         "headers": {
-          "x-api-key": "hackathon-secret-key"
+          "x-api-key": "YOUR_API_KEY_HERE"
         }
       },
       "response": {
@@ -140,10 +140,10 @@
   },
 
   "CURL_EXAMPLES": {
-    "honeypot_api": "curl -X POST https://web-production-b7ac.up.railway.app/honeypot -H \"x-api-key: hackathon-secret-key\" -H \"Content-Type: application/json\" -d '{\"conversation_id\": \"test123\", \"message\": \"Pay Rs 5000 to unfreeze account\"}'",
+    "honeypot_api": "curl -X POST https://web-production-b7ac.up.railway.app/honeypot -H \"x-api-key: YOUR_API_KEY_HERE\" -H \"Content-Type: application/json\" -d '{\"conversation_id\": \"test123\", \"message\": \"Pay Rs 5000 to unfreeze account\"}'",
     
-    "email_analysis": "curl -X POST https://web-production-b7ac.up.railway.app/analyze-email -H \"x-api-key: hackathon-secret-key\" -H \"Content-Type: application/json\" -d '{\"from_email\": \"fake@bank.com\", \"subject\": \"Urgent verification\", \"message_text\": \"Pay now\", \"links\": []}'",
+    "email_analysis": "curl -X POST https://web-production-b7ac.up.railway.app/analyze-email -H \"x-api-key: YOUR_API_KEY_HERE\" -H \"Content-Type: application/json\" -d '{\"from_email\": \"fake@bank.com\", \"subject\": \"Urgent verification\", \"message_text\": \"Pay now\", \"links\": []}'",
     
-    "get_flagged": "curl -H \"x-api-key: hackathon-secret-key\" https://web-production-b7ac.up.railway.app/admin/flagged-intelligence"
+    "get_flagged": "curl -H \"x-api-key: YOUR_API_KEY_HERE\" https://web-production-b7ac.up.railway.app/admin/flagged-intelligence"
   }
 }

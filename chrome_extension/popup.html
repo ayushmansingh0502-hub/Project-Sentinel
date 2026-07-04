@@ -97,6 +97,28 @@
       font-size: 13px;
     }
 
+    .setting-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 8px 0;
+      font-size: 13px;
+    }
+
+    .setting-stack label {
+      color: #555;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .setting-stack input {
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 8px;
+      font-size: 12px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
     .toggle {
       width: 40px;
       height: 24px;
@@ -227,6 +249,11 @@
       <p>AI-powered email scam detection powered by Gemini</p>
     </div>
 
+    <div class="alert alert-error" id="api-warning" style="display: none; margin-bottom: 16px;">
+      <strong>API Key Required!</strong><br>
+      Please configure your API Key and Base URL in the settings below to enable scanning.
+    </div>
+
     <div class="stats">
       <div class="stat-row">
         <span class="stat-label">UPI IDs Flagged</span>
@@ -256,6 +283,16 @@
         <span>Highlight suspicious content</span>
         <button class="toggle active" id="toggle-highlight"></button>
       </div>
+      <div class="setting-stack">
+        <label for="api-base">Backend API base</label>
+        <input id="api-base" type="text" placeholder="https://your-api.example.com">
+      </div>
+      <div class="setting-stack">
+        <label for="api-key">API key</label>
+        <input id="api-key" type="password" placeholder="Enter API key">
+      </div>
+      <button class="button button-primary" id="save-api-settings">Save API Settings</button>
+      <div class="alert alert-success" id="api-save-status" style="display:none;">Settings saved</div>
     </div>
 
     <div class="section">

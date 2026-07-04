@@ -1,11 +1,16 @@
 """Test long conversation blocking"""
+import os
 import requests
 import time
 import json
 
 url = "https://web-production-b7ac.up.railway.app/honeypot"
+API_KEY = (os.getenv("API_KEY") or "").strip()
+if not API_KEY:
+    raise RuntimeError("API_KEY environment variable is required.")
+
 headers = {
-    "x-api-key": "hackathon-secret-key",
+    "x-api-key": API_KEY,
     "Content-Type": "application/json"
 }
 

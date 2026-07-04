@@ -1,17 +1,27 @@
 // Background Service Worker - Handles API calls and message routing
-const API_BASE = "https://web-production-b7ac.up.railway.app";
-const API_KEY = "hackathon-secret-key";
+const DEFAULT_API_BASE = "http://localhost:8000";
 
 // Store API key securely in extension storage
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.sync.set({
-    apiKey: API_KEY,
-    apiBase: API_BASE,
+    apiKey: "",
+    apiBase: DEFAULT_API_BASE,
     autoAnalyze: true,
     highlightScams: true
   });
   console.log("🛡️ Scam Shield initialized");
 });
+
+function getConfig() {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get(["apiKey", "apiBase"], (items) => {
+      resolve({
+        apiKey: (items.apiKey || "").trim(),
+        apiBase: (items.apiBase || DEFAULT_API_BASE).trim(),
+      });
+    });
+  });
+}
 
 // Listen for messages from content script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -44,6 +54,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
  * Analyze email using backend API
  */
 async function analyzeEmail(emailData) {
+  const { apiKey, apiBase } = await getConfig();
+  if (!apiKey) {
+    throw new Error("API key is not configured. Open extension popup and set it in Settings.");
+  }
+
   const { from_email, from_name, subject, message_text, links } = emailData;
   
   const payload = {
@@ -56,11 +71,11 @@ async function analyzeEmail(emailData) {
   
   console.log("📤 Sending to API:", payload);
   
-  const response = await fetch(`${API_BASE}/analyze-email`, {
+  const response = await fetch(`${apiBase}/analyze-email`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": API_KEY
+      "x-api-key": apiKey
     },
     body: JSON.stringify(payload)
   });
@@ -78,10 +93,15 @@ async function analyzeEmail(emailData) {
  * Get flagged intelligence statistics
  */
 async function getFlaggedStats() {
-  const response = await fetch(`${API_BASE}/admin/flagged-intelligence`, {
+  const { apiKey, apiBase } = await getConfig();
+  if (!apiKey) {
+    throw new Error("API key is not configured. Open extension popup and set it in Settings.");
+  }
+
+  const response = await fetch(`${apiBase}/admin/flagged-intelligence`, {
     method: "GET",
     headers: {
-      "x-api-key": API_KEY
+      "x-api-key": apiKey
     }
   });
   

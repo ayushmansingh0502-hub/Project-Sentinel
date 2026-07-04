@@ -1,38 +1,66 @@
-# Agentic Honeypot Backend
+﻿# HONEYPOT API
 
-FastAPI backend for the honeypot service.
+FastAPI backend for the AI-driven cyber resilience prototype.
 
-## Local run
+## Development setup
 
-1. Create and activate a virtual environment.
-2. Install dependencies:
-   - `pip install -r requirements.txt`
-3. Set environment variables (optional):
-   - `API_KEY` (default: `hackathon-secret-key`)
-   - `REDIS_URL` (preferred), or `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`
-4. Start the server:
-   - `uvicorn main:app --host 0.0.0.0 --port 8000`
+Use a project-local virtual environment for all installs:
 
-## API
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements-dev.txt
+```
+
+The development dependency set upgrades FastAPI and Pydantic to compatible v2-era versions and adds pytest/httpx for smoke coverage.
+
+## Start/Stop the server
+
+Use the single PowerShell switcher to manage the local server:
+
+```powershell
+.\scripts\ServerSwitch.ps1 toggle
+```
+
+Other supported actions:
+
+```powershell
+.\scripts\ServerSwitch.ps1 start
+.\scripts\ServerSwitch.ps1 stop
+.\scripts\ServerSwitch.ps1 status
+```
+
+The switcher uses the local `.venv` and writes runtime state into `.run/`.
+
+## Documentation
+
+- [Docs index](docs/README.md)
+- [Architecture](docs/architecture.md)
+- [Quickstart](docs/quickstart.md)
+- [Deployment guide](docs/deployment_guide.md)
+- [WhatsApp implementation plan](docs/whatsapp_implementation_plan.md)
+- [Change log](docs/changes.md)
+- [Development setup](docs/dev_setup.md)
+
+## API overview
 
 - `POST /honeypot`
-  - Headers: `x-api-key: <API_KEY>` (if you enable API key verification)
-  - Body:
-    ```json
-    {
-      "conversation_id": "abc",
-      "message": "Your account is blocked, pay now"
-    }
-    ```
+- `POST /telemetry`
+- `GET /incidents`
+- `GET /playbooks`
+- `POST /incidents/{incident_id}/action`
+- `GET /incidents/{incident_id}/audit`
 
-## Railway deployment
+## Demo scenarios
 
-1. Push this repo to GitHub.
-2. In Railway, create a new project from the GitHub repo.
-3. Add a Redis service (or attach an external Redis).
-4. Set environment variables:
-   - `REDIS_URL` from the Railway Redis service
-   - `API_KEY` (optional)
-5. Railway will use the `Procfile` to run the app.
+Run the local demo harness and capture metrics with:
 
-After deploy, the public URL will be available in Railway.
+```powershell
+.\.venv\Scripts\python.exe demo\run_scenarios.py
+```
+
+It writes aggregate MTTD/MTTR, detection rate, and false-positive rate to `demo/results/latest_metrics.json`.
+
+## Deployment
+
+The `Procfile` is still used for hosted deployment. For local work, prefer the switcher script above.
