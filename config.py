@@ -1,6 +1,6 @@
 """
-SwarmSentinel — Centralized Configuration
-==========================================
+SwarmSentinel - Centralized Configuration
+=========================================
 
 Single source of truth for all configurable parameters.
 Values are loaded from environment variables with sensible defaults.
@@ -9,6 +9,29 @@ Values are loaded from environment variables with sensible defaults.
 import os
 from dataclasses import dataclass, field
 from typing import Optional
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+_PLACEHOLDER_SECRET_VALUES = {
+    "YOUR_API_KEY_HERE",
+    "YOUR_GOOGLE_AI_STUDIO_KEY_HERE",
+}
+
+
+class ConfigError(RuntimeError):
+    """Raised when required runtime configuration is missing or unsafe."""
+
+
+
+def _is_placeholder_secret(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    normalized = value.strip()
+    if normalized in _PLACEHOLDER_SECRET_VALUES:
+        return True
+    return "YOUR_UPSTASH_PASSWORD" in normalized or "YOUR_UPSTASH_HOST" in normalized
 
 
 @dataclass
@@ -72,6 +95,7 @@ class QueueConfig:
 class APIConfig:
     """API server configuration."""
     api_key: str = ""
+    google_ai_studio_key: str = ""
     rate_limit_requests: int = 30
     rate_limit_window_seconds: int = 60
     cors_origins: list = field(default_factory=lambda: ["*"])
@@ -100,6 +124,7 @@ class AppConfig:
 
         # API
         cfg.api.api_key = (os.getenv("API_KEY") or "").strip()
+        cfg.api.google_ai_studio_key = (os.getenv("GOOGLE_AI_STUDIO_KEY") or "").strip()
         cfg.api.rate_limit_requests = int(os.getenv("RATE_LIMIT_REQUESTS", "30"))
         cfg.api.rate_limit_window_seconds = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 
@@ -118,6 +143,18 @@ class AppConfig:
 
         return cfg
 
+    def validate_runtime_requirements(self) -> "AppConfig":
+        """Fail fast when required or placeholder secrets are present."""
+        if not self.api.api_key:
+            raise ConfigError("API_KEY environment variable is required.")
+        if _is_placeholder_secret(self.api.api_key):
+            raise ConfigError("API_KEY must be replaced with a real secret before startup.")
+        if self.api.google_ai_studio_key and _is_placeholder_secret(self.api.google_ai_studio_key):
+            raise ConfigError("GOOGLE_AI_STUDIO_KEY contains a placeholder value.")
+        if self.redis_url and _is_placeholder_secret(self.redis_url):
+            raise ConfigError("REDIS_URL contains placeholder credentials.")
+        return self
+
     def to_dict(self) -> dict:
         """Serialize config for /health or /metrics endpoints (redacts secrets)."""
         return {
@@ -128,6 +165,7 @@ class AppConfig:
             "queue_max_size": self.queue.max_size,
             "rate_limit": f"{self.api.rate_limit_requests}/{self.api.rate_limit_window_seconds}s",
             "api_key_set": bool(self.api.api_key),
+            "google_ai_studio_key_set": bool(self.api.google_ai_studio_key),
             "redis_configured": bool(self.redis_url),
         }
 

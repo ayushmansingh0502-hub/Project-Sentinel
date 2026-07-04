@@ -1,5 +1,5 @@
 // Background Service Worker - Handles API calls and message routing
-const DEFAULT_API_BASE = "https://web-production-b7ac.up.railway.app";
+const DEFAULT_API_BASE = "http://localhost:8000";
 
 // Store API key securely in extension storage
 chrome.runtime.onInstalled.addListener(() => {
