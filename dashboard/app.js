@@ -9,16 +9,52 @@ const API = `${location.protocol}//${location.host}`;
 const API_KEY_STORAGE_KEY = 'swarmsentinel_api_key';
 let API_KEY = (localStorage.getItem(API_KEY_STORAGE_KEY) || '').trim();
 
+let resolveApiKeyPromise = null;
+
 function ensureApiKey() {
-  if (API_KEY) return true;
-  const entered = window.prompt('Enter API key for dashboard actions:');
+  if (API_KEY) return Promise.resolve(true);
+  
+  // Show modal to get API key
+  return new Promise((resolve) => {
+    resolveApiKeyPromise = resolve;
+    showSettings(true);
+  });
+}
+
+function showSettings(isFirstRun = false) {
+  const modal = $('setupModal');
+  const closeBtn = $('modalCloseBtn');
+  if (modal) {
+    modal.style.display = 'flex';
+    $('modalApiKey').value = API_KEY;
+    if (closeBtn) closeBtn.style.display = isFirstRun ? 'none' : 'inline-block';
+    $('modalError').style.display = 'none';
+  }
+}
+
+function hideSettings() {
+  const modal = $('setupModal');
+  if (modal) modal.style.display = 'none';
+  if (resolveApiKeyPromise) {
+    resolveApiKeyPromise(false);
+    resolveApiKeyPromise = null;
+  }
+}
+
+function saveSettings() {
+  const entered = $('modalApiKey').value;
   if (!entered || !entered.trim()) {
-    toast('API key is required for authenticated actions', 'err');
-    return false;
+    $('modalError').style.display = 'block';
+    return;
   }
   API_KEY = entered.trim();
   localStorage.setItem(API_KEY_STORAGE_KEY, API_KEY);
-  return true;
+  hideSettings();
+  toast('API key configured', 'ok');
+  if (resolveApiKeyPromise) {
+    resolveApiKeyPromise(true);
+    resolveApiKeyPromise = null;
+  }
 }
 
 function authHeaders(withJson = true) {
@@ -466,7 +502,8 @@ function renderInc() {
 // ═══════════════════════════════════════
 
 async function resetAndRun() {
-  if (!ensureApiKey()) return;
+  const hasKey = await ensureApiKey();
+  if (!hasKey) return;
   try { await fetch(`${API}/swarm/reset`, { method: 'POST', headers: authHeaders() }); } catch (e) {}
   nodes = []; links = []; nodeById.clear();
   incidents = []; feedCount = 0;
@@ -486,24 +523,35 @@ async function resetAndRun() {
 }
 
 async function runScenario() {
-  if (!ensureApiKey()) return;
+  const hasKey = await ensureApiKey();
+  if (!hasKey) return;
   const sel = $('scenarioSelect');
   const sc = sel ? sel.value : 'apt_killchain';
   try {
     const r = await fetch(`${API}/swarm/simulate`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ action: 'scenario', scenario: sc, events_per_second: 2.5 }) });
+    if (!r.ok) {
+      if (r.status === 401 || r.status === 403) {
+        toast('Invalid API Key. Please check settings.', 'err');
+        showSettings();
+        return;
+      }
+      throw new Error(`HTTP error ${r.status}`);
+    }
     const d = await r.json();
     if (d.status === 'already_running') toast('Simulation already running', 'err');
   } catch (e) { toast('Failed: ' + e.message, 'err'); }
 }
 
 async function stopSim() {
-  if (!ensureApiKey()) return;
+  const hasKey = await ensureApiKey();
+  if (!hasKey) return;
   try { await fetch(`${API}/swarm/simulate`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ action: 'stop' }) }); } catch (e) {}
   setText('simLabel', 'Stopping');
 }
 
 async function swarmStart() {
-  if (!ensureApiKey()) return;
+  const hasKey = await ensureApiKey();
+  if (!hasKey) return;
   try {
     const r = await fetch(`${API}/swarm/start`, { method: 'POST', headers: authHeaders() });
     const d = await r.json();
@@ -517,7 +565,8 @@ async function swarmStart() {
 }
 
 async function swarmStop() {
-  if (!ensureApiKey()) return;
+  const hasKey = await ensureApiKey();
+  if (!hasKey) return;
   try { 
     await fetch(`${API}/swarm/stop`, { method: 'POST', headers: authHeaders() }); 
     toast('Swarm stopped', 'ok'); 
@@ -639,7 +688,8 @@ function applySearchFilter() {
 }
 
 async function execContainment(action, entityId, entityType, reason) {
-  if (!ensureApiKey()) return;
+  const hasKey = await ensureApiKey();
+  if (!hasKey) return;
   toast(`Requesting ${action}...`, 'ok');
   try {
     const r = await fetch(`${API}/containment/action`, { 
@@ -685,6 +735,23 @@ document.addEventListener('DOMContentLoaded', () => {
     simulation.force('y', d3.forceY(p.clientHeight / 2).strength(0.03));
     simulation.alpha(0.1).restart();
   });
+
+  // Expose UI functions globally
+  window.showSettings = showSettings;
+  window.hideSettings = hideSettings;
+  window.saveSettings = saveSettings;
+  window.resetAndRun = resetAndRun;
+  window.runScenario = runScenario;
+  window.stopSim = stopSim;
+  window.swarmStart = swarmStart;
+  window.swarmStop = swarmStop;
+  window.switchTab = switchTab;
+  window.highlightEntities = highlightEntities;
+
+  // Check API Key on load
+  if (!API_KEY) {
+    setTimeout(() => showSettings(true), 500);
+  }
 
   // DOM Events
   document.addEventListener('click', () => { hideContextMenu(); if (!selectedNode) clearHighlight(); });
