@@ -51,6 +51,7 @@ function saveSettings() {
   localStorage.setItem(API_KEY_STORAGE_KEY, API_KEY);
   hideSettings();
   toast('API key configured', 'ok');
+  connectWS();
   if (resolveApiKeyPromise) {
     resolveApiKeyPromise(true);
     resolveApiKeyPromise = null;
@@ -83,6 +84,8 @@ let nodeById = new Map();
 let incidents = [], feedCount = 0;
 let selectedNode = null;
 let searchQuery = '';
+let traceMap = null;
+let traceLayer = null;
 
 const $ = id => document.getElementById(id);
 const setText = (id, text) => { const el = $(id); if (el) el.textContent = text; };
@@ -305,7 +308,7 @@ function showTip(event, d) {
   const t = $('tooltip');
   const name = d.id.includes(':') ? d.id.split(':').slice(1).join(':') : d.id;
   t.innerHTML = `<span class="t-name">${esc(name)}</span><br>`
-    + `<span class="t-dim">Type</span> <span class="t-val">${d.type}</span><br>`
+    + `<span class="t-dim">Type</span> <span class="t-val">${esc(d.type)}</span><br>`
     + `<span class="t-dim">Pheromone</span> <span class="t-val">${(d.pheromone||0).toFixed(1)}</span>`
     + (d.metadata && Object.keys(d.metadata).length ? `<br><span class="t-dim">Meta</span> <span class="t-val">${JSON.stringify(d.metadata)}</span>` : '');
   t.style.display = 'block';
@@ -332,6 +335,93 @@ function switchTab(tab) {
   document.querySelectorAll('.panel-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   $('panelIncidents').hidden = tab !== 'incidents';
   $('panelFeed').hidden = tab !== 'feed';
+  $('panelPredictions').hidden = tab !== 'predictions';
+  $('panelTrace').hidden = tab !== 'trace';
+  if (tab === 'trace' && traceMap) setTimeout(() => traceMap.invalidateSize(), 0);
+}
+
+function initTraceMap() {
+  const el = $('traceMap');
+  if (!el || typeof L === 'undefined') return;
+  traceMap = L.map(el, { zoomControl: false, attributionControl: true }).setView([20, 0], 2);
+  L.control.zoom({ position: 'bottomright' }).addTo(traceMap);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+    attribution: '&copy; OpenStreetMap contributors',
+  }).addTo(traceMap);
+  traceLayer = L.layerGroup().addTo(traceMap);
+}
+
+function renderEmailTrace(data) {
+  const rawHops = data?.hops || data?.relay_hops || data?.header_analysis?.relay_hops || [];
+  const origin = data?.origin_trace || data?.origin || {};
+  const header = data?.header_analysis || {};
+  const auth = header.authentication || data?.authentication || {};
+  const domain = data?.domain_intel || {};
+  const spoof = data?.brand_spoof || {};
+  const hops = rawHops.filter(h => Number.isFinite(Number(h.lat ?? h.latitude)) && Number.isFinite(Number(h.lon ?? h.longitude)));
+  if (!hops.length && Number.isFinite(Number(origin.latitude)) && Number.isFinite(Number(origin.longitude))) {
+    hops.push({ ip: origin.ip, city: origin.city, country: origin.country, latitude: origin.latitude, longitude: origin.longitude });
+  }
+  setText('traceBadge', rawHops.length || (origin.ip ? 1 : 0));
+  setText('traceSummary', origin.ip ? `Probable origin: ${origin.ip}` : (rawHops.length ? `${rawHops.length} relay hops` : 'No geolocation data available'));
+  const evidence = $('traceEvidence');
+  if (evidence) {
+    const authRows = ['spf', 'dkim', 'dmarc'].map(name => `<span class="evidence-chip ${auth[name] === 'pass' ? 'good' : auth[name] ? 'bad' : ''}">${name.toUpperCase()}: ${esc(auth[name] || 'unavailable')}</span>`).join('');
+    const signals = [...(header.anomalies || []), ...(domain.reputation_signals || [])];
+    if (spoof.suspected) signals.push(`brand spoof: ${spoof.matched_brand || 'suspected'}`);
+    evidence.innerHTML = `${authRows}<div class="evidence-signals">${signals.length ? signals.map(signal => `<span class="evidence-signal">${esc(signal)}</span>`).join('') : 'No additional forensic signals'}</div>`;
+  }
+  const path = $('tracePath');
+  if (path) {
+    path.innerHTML = rawHops.map((hop, index) => {
+      const label = hop.ip || hop.host || hop.from_host || `Hop ${index + 1}`;
+      const location = [hop.city, hop.country].filter(Boolean).join(', ') || 'Location unavailable';
+      return `<div class="trace-hop"><span class="trace-index">${index + 1}</span><div><div class="trace-host">${esc(label)}</div><div class="trace-location">${esc(location)}</div></div></div>`;
+    }).join('') || '<div class="empty-msg">No relay hops available</div>';
+  }
+  if (!traceMap || !traceLayer) return;
+  traceLayer.clearLayers();
+  if (!hops.length) return;
+  const points = hops.map(h => [Number(h.lat ?? h.latitude), Number(h.lon ?? h.longitude)]);
+  L.polyline(points, { color: '#6E7BF5', weight: 3, opacity: 0.85 }).addTo(traceLayer);
+  hops.forEach((hop, index) => {
+    const point = [Number(hop.lat ?? hop.latitude), Number(hop.lon ?? hop.longitude)];
+    L.circleMarker(point, { radius: 6, color: index === hops.length - 1 ? '#E5484D' : '#30A46C', fillOpacity: 0.9 })
+      .bindTooltip(`${index + 1}. ${hop.ip || hop.host || 'relay'}`)
+      .addTo(traceLayer);
+  });
+  traceMap.fitBounds(points, { padding: [20, 20], maxZoom: 8 });
+}
+
+async function analyzeEmailFromDashboard(event) {
+  event.preventDefault();
+  const hasKey = await ensureApiKey();
+  if (!hasKey) return;
+  const error = $('traceError');
+  if (error) error.textContent = '';
+  const body = {
+    from_email: $('traceFromEmail').value.trim(),
+    from_name: $('traceFromName').value.trim() || null,
+    message_text: $('traceMessage').value.trim(),
+  };
+  const headers = $('traceHeaders').value.trim();
+  if (headers) body.raw_headers = headers;
+  try {
+    const response = await fetch(`${API}/analyze-email`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(body),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || `HTTP ${response.status}`);
+    renderEmailTrace(result);
+    switchTab('trace');
+    toast(`Email analyzed: ${result.risk?.risk_level || 'unknown'} risk`, result.is_scam ? 'err' : 'ok');
+  } catch (err) {
+    if (error) error.textContent = err.message;
+    toast('Email analysis failed', 'err');
+  }
 }
 
 // ═══════════════════════════════════════
@@ -339,11 +429,15 @@ function switchTab(tab) {
 // ═══════════════════════════════════════
 
 function connectWS() {
+  if (!API_KEY) return;
   if (ws && ws.readyState === WebSocket.OPEN) return;
   ws = new WebSocket(WS_URL);
-  ws.onopen = () => { setConn(true); toast('Connected', 'ok'); if (reconnTimer) { clearTimeout(reconnTimer); reconnTimer = null; } };
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'auth', api_key: API_KEY }));
+    if (reconnTimer) { clearTimeout(reconnTimer); reconnTimer = null; }
+  };
   ws.onmessage = e => { try { route(JSON.parse(e.data)); } catch(err) { console.error(err); } };
-  ws.onclose = () => { setConn(false); schedReconn(); };
+  ws.onclose = () => { setConn(false); if (API_KEY) schedReconn(); };
   ws.onerror = () => setConn(false);
 }
 
@@ -357,7 +451,9 @@ function setConn(ok) {
 
 function route(msg) {
   const { type, data, timestamp } = msg;
-  switch (type) {
+  const messageType = type || msg.msg_type;
+  switch (messageType) {
+    case 'auth_ok': setConn(true); toast('Connected', 'ok'); break;
     case 'init':
       if (data.graph) renderGraph(data.graph);
       if (data.incidents) { incidents = data.incidents; renderInc(); }
@@ -372,6 +468,7 @@ function route(msg) {
     case 'simulation_start': onSimStart(data); break;
     case 'simulation_end': onSimEnd(data); break;
     case 'containment_action': onContainment(data, timestamp); break;
+    case 'email_trace': renderEmailTrace(data); switchTab('trace'); break;
   }
 }
 
@@ -491,10 +588,24 @@ function renderInc() {
   el.innerHTML = incidents.slice(0, 25).map(inc => {
     const s = inc.score || 0;
     const sev = s >= 80 ? 'crit' : s >= 60 ? 'high' : 'med';
-    const ents = (inc.entities || []).map(e => `${e.type}:${e.id}`).join(', ');
-    const tags = (inc.mitre || []).map(t => `<span class="tag">${t}</span>`).join('');
-    return `<div class="inc-item" style="cursor:pointer" onclick="highlightEntities([${(inc.entities||[]).map(e=>`'${e.type}:${e.id}'`).join(',')}])"><div class="inc-top"><span class="inc-id">INC-${inc.id}</span><span class="inc-score ${sev}">${s.toFixed(0)}</span></div><div class="inc-entities">${ents}</div>${tags ? `<div class="inc-tags">${tags}</div>` : ''}</div>`;
+    const entityIds = (inc.entities || []).map(e => `${e.type}:${e.id}`);
+    const ents = entityIds.join(', ');
+    const tags = (inc.mitre || []).map(t => `<span class="tag">${esc(t)}</span>`).join('');
+    return `<div class="inc-item js-highlight-entities" data-highlight-entities="${esc(JSON.stringify(entityIds))}" style="cursor:pointer"><div class="inc-top"><span class="inc-id">INC-${esc(inc.id)}</span><span class="inc-score ${sev}">${s.toFixed(0)}</span></div><div class="inc-entities">${esc(ents)}</div>${tags ? `<div class="inc-tags">${tags}</div>` : ''}</div>`;
   }).join('');
+  bindHighlightHandlers(el);
+}
+
+function bindHighlightHandlers(container) {
+  container.querySelectorAll('[data-highlight-entities]').forEach(element => {
+    element.addEventListener('click', () => {
+      try {
+        highlightEntities(JSON.parse(element.dataset.highlightEntities || '[]'));
+      } catch (_) {
+        // Ignore malformed data attributes rather than executing page content.
+      }
+    });
+  });
 }
 
 // ═══════════════════════════════════════
@@ -606,10 +717,10 @@ function showDetailPanel(node) {
   if (!p) return;
   const rawId = node.id.includes(':') ? node.id.split(':').slice(1).join(':') : node.id;
   setText('detailTitle', rawId);
-  let html = `<div class="prop-row"><span class="prop-lbl">Type</span><span class="prop-val">${node.type}</span></div>`;
+  let html = `<div class="prop-row"><span class="prop-lbl">Type</span><span class="prop-val">${esc(node.type)}</span></div>`;
   html += `<div class="prop-row"><span class="prop-lbl">Pheromone</span><span class="prop-val">${(node.pheromone||0).toFixed(1)}</span></div>`;
   if (node.metadata && Object.keys(node.metadata).length > 0) {
-    html += `<div class="prop-lbl" style="margin-top:12px">Metadata</div><div class="meta-block">${JSON.stringify(node.metadata, null, 2)}</div>`;
+    html += `<div class="prop-lbl" style="margin-top:12px">Metadata</div><div class="meta-block">${esc(JSON.stringify(node.metadata, null, 2))}</div>`;
   }
   
   // Find connected edges
@@ -618,10 +729,11 @@ function showDetailPanel(node) {
   connected.slice(0, 20).forEach(l => {
     const isSrc = (l.source.id||l.source) === node.id;
     const otherId = isSrc ? (l.target.id||l.target) : (l.source.id||l.source);
-    html += `<div class="feed-item" style="margin-top:4px;cursor:pointer" onclick="highlightEntities(['${otherId}'])"><div class="feed-body"><div class="feed-title">${esc(otherId)}</div><div class="feed-desc">Weight: ${(l.weight||0).toFixed(1)} | ${(l.signal_types||[]).join(', ')}</div></div></div>`;
+    html += `<div class="feed-item js-highlight-entities" data-highlight-entities="${esc(JSON.stringify([otherId]))}" style="margin-top:4px;cursor:pointer"><div class="feed-body"><div class="feed-title">${esc(otherId)}</div><div class="feed-desc">Weight: ${(l.weight||0).toFixed(1)} | ${esc((l.signal_types||[]).join(', '))}</div></div></div>`;
   });
 
   setHtml('detailBody', html);
+  bindHighlightHandlers($('detailBody'));
   p.classList.add('open');
 }
 
@@ -710,11 +822,12 @@ async function fetchPredictions() {
       const el = $('predList');
       if (el) {
         el.innerHTML = d.predictions.map(p => 
-          `<div class="inc-item" style="cursor:pointer" onclick="highlightEntities(['${p.entity_id}'])">
+          `<div class="inc-item js-highlight-entities" data-highlight-entities="${esc(JSON.stringify([p.entity_id]))}" style="cursor:pointer">
             <div class="inc-top"><span class="inc-id">${esc(p.entity_id.split(':').slice(1).join(':'))}</span><span class="inc-score crit">${p.risk_score.toFixed(1)}</span></div>
-            <div class="inc-entities" style="font-size:10px">${p.reason}</div>
+            <div class="inc-entities" style="font-size:10px">${esc(p.reason)}</div>
           </div>`
         ).join('');
+        bindHighlightHandlers(el);
         $('predEmpty').style.display = 'none';
       }
     }
@@ -724,7 +837,8 @@ async function fetchPredictions() {
 // ── Init ──
 document.addEventListener('DOMContentLoaded', () => {
   initGraph();
-  connectWS();
+  initTraceMap();
+  if (API_KEY) connectWS();
   setInterval(() => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'request_status' })); }, 8000);
   window.addEventListener('resize', () => {
     if (!simulation) return;
@@ -747,6 +861,9 @@ document.addEventListener('DOMContentLoaded', () => {
   window.swarmStop = swarmStop;
   window.switchTab = switchTab;
   window.highlightEntities = highlightEntities;
+  window.renderEmailTrace = renderEmailTrace;
+  const traceForm = $('emailTraceForm');
+  if (traceForm) traceForm.addEventListener('submit', analyzeEmailFromDashboard);
 
   // Check API Key on load
   if (!API_KEY) {

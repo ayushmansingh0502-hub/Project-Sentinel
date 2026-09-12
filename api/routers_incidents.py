@@ -34,7 +34,7 @@ async def take_incident_action(
         result = apply_action(
             int(incident_id),
             body.action,
-            actor=body.actor,
+            actor="authenticated_api",
             params=body.params,
         )
         logger.info(logfmt("incident_action_ok", incident_id=incident_id, action=body.action, actor=body.actor, result=result.get("result")))

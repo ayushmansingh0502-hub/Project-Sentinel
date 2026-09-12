@@ -27,7 +27,7 @@ async def containment_action(
         action=body.action,
         entity_id=body.entity_id,
         entity_type=body.entity_type,
-        actor=body.actor,
+        actor="authenticated_api",
         reason=body.reason,
         incident_id=body.incident_id,
         ttl_seconds=body.ttl_seconds,
@@ -86,7 +86,7 @@ async def swarm_activity(limit: int = Query(default=20, ge=1, le=200), api_key: 
 
 
 @router.get("/swarm/scenarios")
-async def list_scenarios():
+async def list_scenarios(api_key: str = Depends(verify_api_key)):
     sim = TelemetrySimulator()
     return {"scenarios": sim.get_available_scenarios()}
 

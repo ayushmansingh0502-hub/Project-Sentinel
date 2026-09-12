@@ -99,6 +99,7 @@ class APIConfig:
     rate_limit_requests: int = 30
     rate_limit_window_seconds: int = 60
     cors_origins: list = field(default_factory=lambda: ["*"])
+    trusted_proxy_ips: list = field(default_factory=list)
     ws_heartbeat_seconds: float = 30.0
     max_incidents_per_page: int = 50
 
@@ -127,6 +128,19 @@ class AppConfig:
         cfg.api.google_ai_studio_key = (os.getenv("GOOGLE_AI_STUDIO_KEY") or "").strip()
         cfg.api.rate_limit_requests = int(os.getenv("RATE_LIMIT_REQUESTS", "30"))
         cfg.api.rate_limit_window_seconds = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
+        cfg.api.cors_origins = [
+            origin.strip()
+            for origin in os.getenv(
+                "CORS_ORIGINS",
+                "http://localhost:8000,http://127.0.0.1:8000,https://mail.google.com,https://www.gmail.com",
+            ).split(",")
+            if origin.strip()
+        ]
+        cfg.api.trusted_proxy_ips = [
+            address.strip()
+            for address in os.getenv("TRUSTED_PROXY_IPS", "").split(",")
+            if address.strip()
+        ]
 
         # Graph
         cfg.graph.decay_rate = float(os.getenv("GRAPH_DECAY_RATE", "0.95"))

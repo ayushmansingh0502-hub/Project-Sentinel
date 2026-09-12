@@ -9,7 +9,7 @@ def _serialize_value(value: Any) -> str:
         return f"{value:.3f}"
     if isinstance(value, (dict, list, tuple, set)):
         return json.dumps(value, sort_keys=True, default=str)
-    return str(value)
+    return str(value).replace("\r", "\\r").replace("\n", "\\n")
 
 
 def logfmt(event: str, **fields: Any) -> str:

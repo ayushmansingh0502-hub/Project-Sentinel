@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
+import ipaddress
+import hmac
 from threading import Lock
 import time
 from typing import DefaultDict
@@ -20,16 +22,33 @@ _rate_limit_lock = Lock()
 
 
 def verify_api_key(api_key: str = Depends(api_key_header)) -> str:
-    if api_key != API_KEY:
+    if not hmac.compare_digest(api_key, API_KEY):
         raise HTTPException(status_code=403, detail="Invalid API key.")
     return api_key
 
 
 def get_client_ip(request: Request) -> str:
+    remote_ip = request.client.host if request.client else "unknown"
     forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
+    if forwarded and _is_trusted_proxy(remote_ip):
         return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    return remote_ip
+
+
+def _is_trusted_proxy(remote_ip: str) -> bool:
+    try:
+        address = ipaddress.ip_address(remote_ip)
+    except ValueError:
+        return False
+    for configured in config.api.trusted_proxy_ips:
+        try:
+            if address == ipaddress.ip_address(configured):
+                return True
+            if address in ipaddress.ip_network(configured, strict=False):
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def is_rate_limited(client_ip: str) -> bool:

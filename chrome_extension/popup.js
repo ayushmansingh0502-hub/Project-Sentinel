@@ -3,11 +3,11 @@ console.log("📋 Popup initialized");
 
 // Load settings on popup open
 document.addEventListener('DOMContentLoaded', () => {
-  loadFlaggedStats();
   loadSettings();
-  loadApiSettings();
   setupToggleButtons();
   setupApiSettings();
+  setupConnectionTest();
+  loadApiSettings(() => loadFlaggedStats());
 });
 
 /**
@@ -17,6 +17,12 @@ function loadFlaggedStats() {
   chrome.runtime.sendMessage(
     { action: "getFlaggedStats" },
     (response) => {
+      if (chrome.runtime.lastError || !response) {
+        const message = chrome.runtime.lastError?.message || "Background service did not respond";
+        console.error("Failed to load stats:", message);
+        document.getElementById('stat-total').textContent = "Error";
+        return;
+      }
       if (response.success) {
         document.getElementById('api-warning').style.display = 'none';
         const stats = response.data;
@@ -49,16 +55,23 @@ function loadSettings() {
   });
 }
 
-function loadApiSettings() {
+function loadApiSettings(onReady) {
   chrome.storage.sync.get(['apiBase', 'apiKey'], (items) => {
     const baseInput = document.getElementById('api-base');
     const keyInput = document.getElementById('api-key');
-    if (baseInput) baseInput.value = items.apiBase || 'http://localhost:8000';
+    const storedBase = items.apiBase || '';
+    const apiBase = storedBase.includes('web-production-b7ac.up.railway.app')
+      ? 'http://127.0.0.1:8000'
+      : (storedBase || 'http://127.0.0.1:8000');
+    if (baseInput) baseInput.value = apiBase;
     if (keyInput) keyInput.value = items.apiKey || '';
+
+    if (storedBase !== apiBase) chrome.storage.sync.set({ apiBase });
     
     if (!items.apiKey) {
       document.getElementById('api-warning').style.display = 'block';
     }
+    if (onReady) onReady();
   });
 }
 
@@ -91,6 +104,37 @@ function setupApiSettings() {
         if (status) status.style.display = 'none';
       }, 2000);
       loadFlaggedStats();
+    });
+  });
+}
+
+function setupConnectionTest() {
+  const button = document.getElementById('test-api-settings');
+  if (!button) return;
+  button.addEventListener('click', () => {
+    const status = document.getElementById('api-save-status');
+    button.disabled = true;
+    if (status) {
+      status.style.display = 'block';
+      status.className = 'alert';
+      status.textContent = 'Testing connection...';
+    }
+    const apiBase = document.getElementById('api-base')?.value.trim();
+    const apiKey = document.getElementById('api-key')?.value.trim();
+    chrome.runtime.sendMessage({ action: 'testConnection', apiBase, apiKey }, (response) => {
+      button.disabled = false;
+      const error = chrome.runtime.lastError?.message || response?.error;
+      if (!response?.success || error) {
+        if (status) {
+          status.className = 'alert alert-error';
+          status.textContent = error || 'Connection test failed';
+        }
+        return;
+      }
+      if (status) {
+        status.className = 'alert alert-success';
+        status.textContent = `Connected to ${response.data.apiBase}`;
+      }
     });
   });
 }

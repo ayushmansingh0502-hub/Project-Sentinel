@@ -4,7 +4,7 @@ import requests
 import time
 import json
 
-url = "https://web-production-b7ac.up.railway.app/honeypot"
+url = "http://127.0.0.1:8000/honeypot"
 API_KEY = (os.getenv("API_KEY") or "").strip()
 if not API_KEY:
     raise RuntimeError("API_KEY environment variable is required.")

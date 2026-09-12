@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/styles.css?v=6">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 </head>
 <body>
 
@@ -100,6 +101,9 @@
       <div class="panel-tab" data-tab="predictions" onclick="switchTab('predictions')">
         Predictions <span class="badge" id="predBadge">--</span>
       </div>
+      <div class="panel-tab" data-tab="trace" onclick="switchTab('trace')">
+        Trace <span class="badge" id="traceBadge">0</span>
+      </div>
     </div>
 
     <div class="panel-content" id="panelIncidents">
@@ -114,6 +118,23 @@
     <div class="panel-content" id="panelPredictions" hidden>
       <div class="empty-msg" id="predEmpty">No predictions available</div>
       <div id="predList"></div>
+    </div>
+
+    <div class="panel-content trace-content" id="panelTrace" hidden>
+      <form class="trace-form" id="emailTraceForm">
+        <div class="trace-form-grid">
+          <input class="form-control" id="traceFromEmail" type="email" placeholder="Sender email" value="alerts@paypa1.xyz" required>
+          <input class="form-control" id="traceFromName" type="text" placeholder="Display name" value="Bank Support">
+        </div>
+        <textarea class="form-control trace-textarea" id="traceMessage" placeholder="Email message" required>Your account is blocked. Verify now.</textarea>
+        <textarea class="form-control trace-textarea" id="traceHeaders" placeholder="Raw headers (optional)"></textarea>
+        <button class="btn btn-primary trace-submit" type="submit">Analyze Email</button>
+        <div class="trace-error" id="traceError"></div>
+      </form>
+      <div class="trace-summary" id="traceSummary">No email trace available</div>
+      <div class="trace-evidence" id="traceEvidence"></div>
+      <div class="trace-map" id="traceMap"></div>
+      <div class="trace-path" id="tracePath"></div>
     </div>
   </div>
 
@@ -168,6 +189,7 @@
 </div>
 
 <script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="/static/app.js?v=5"></script>
 </body>
 </html>

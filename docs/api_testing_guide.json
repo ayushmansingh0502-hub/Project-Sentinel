@@ -1,8 +1,8 @@
 {
   "API_ENDPOINTS": {
-    "honeypot_endpoint": "POST https://web-production-b7ac.up.railway.app/honeypot",
-    "email_analysis": "POST https://web-production-b7ac.up.railway.app/analyze-email",
-    "flagged_stats": "GET https://web-production-b7ac.up.railway.app/admin/flagged-intelligence"
+    "honeypot_endpoint": "POST http://127.0.0.1:8000/honeypot",
+    "email_analysis": "POST http://127.0.0.1:8000/analyze-email",
+    "flagged_stats": "GET http://127.0.0.1:8000/admin/flagged-intelligence"
   },
   
   "REQUIRED_HEADERS": {
@@ -66,7 +66,7 @@
     "example_4_flagged_intelligence": {
       "request": {
         "method": "GET",
-        "url": "https://web-production-b7ac.up.railway.app/admin/flagged-intelligence",
+        "url": "http://127.0.0.1:8000/admin/flagged-intelligence",
         "headers": {
           "x-api-key": "YOUR_API_KEY_HERE"
         }
@@ -140,10 +140,10 @@
   },
 
   "CURL_EXAMPLES": {
-    "honeypot_api": "curl -X POST https://web-production-b7ac.up.railway.app/honeypot -H \"x-api-key: YOUR_API_KEY_HERE\" -H \"Content-Type: application/json\" -d '{\"conversation_id\": \"test123\", \"message\": \"Pay Rs 5000 to unfreeze account\"}'",
+    "honeypot_api": "curl -X POST http://127.0.0.1:8000/honeypot -H \"x-api-key: YOUR_API_KEY_HERE\" -H \"Content-Type: application/json\" -d '{\"conversation_id\": \"test123\", \"message\": \"Pay Rs 5000 to unfreeze account\"}'",
     
-    "email_analysis": "curl -X POST https://web-production-b7ac.up.railway.app/analyze-email -H \"x-api-key: YOUR_API_KEY_HERE\" -H \"Content-Type: application/json\" -d '{\"from_email\": \"fake@bank.com\", \"subject\": \"Urgent verification\", \"message_text\": \"Pay now\", \"links\": []}'",
+    "email_analysis": "curl -X POST http://127.0.0.1:8000/analyze-email -H \"x-api-key: YOUR_API_KEY_HERE\" -H \"Content-Type: application/json\" -d '{\"from_email\": \"fake@bank.com\", \"subject\": \"Urgent verification\", \"message_text\": \"Pay now\", \"links\": []}'",
     
-    "get_flagged": "curl -H \"x-api-key: YOUR_API_KEY_HERE\" https://web-production-b7ac.up.railway.app/admin/flagged-intelligence"
+    "get_flagged": "curl -H \"x-api-key: YOUR_API_KEY_HERE\" http://127.0.0.1:8000/admin/flagged-intelligence"
   }
 }
