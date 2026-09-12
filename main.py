@@ -37,10 +37,20 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+def _sanitize_for_json(value):
+    if isinstance(value, str):
+        return value.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+    if isinstance(value, dict):
+        return {str(key): _sanitize_for_json(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_for_json(item) for item in value]
+    return value
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=config.api.cors_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -52,7 +62,7 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
         status_code=422,
         content={
             "detail": "Request validation failed.",
-            "errors": exc.errors(),
+            "errors": _sanitize_for_json(exc.errors()),
         },
     )
 

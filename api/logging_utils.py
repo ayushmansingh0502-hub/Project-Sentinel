@@ -18,3 +18,4 @@ def logfmt(event: str, **fields: Any) -> str:
         value = fields[key]
         parts.append(f"{key}={_serialize_value(value)}")
     return " ".join(parts)
+

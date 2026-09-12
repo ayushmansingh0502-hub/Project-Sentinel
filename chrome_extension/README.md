@@ -107,17 +107,23 @@ Appears at top of Gmail email with:
 ```
 
 ### Backend Configuration
-- **API Base:** `https://web-production-b7ac.up.railway.app`
+- **API Base:** `http://127.0.0.1:8000` for local development
 - **API Key:** Set your own key in extension settings
 - **Endpoints:**
   - `POST /analyze-email` - Analyze single email
   - `GET /admin/flagged-intelligence` - Get flagged stats
 
+### Local Troubleshooting
+
+If scanning reports `404 Analysis endpoint not found`, verify that the configured backend contains the `/analyze-email` endpoint. For local development, set **API Base** in the extension settings to `http://127.0.0.1:8000`.
+
+When using the local URL, the extension API key must exactly match the `API_KEY` configured for the local server. A `401` or `403` response means the key and backend do not match.
+
 ## 📱 API Integration
 
 ### Analyze Email Endpoint
 ```bash
-POST https://web-production-b7ac.up.railway.app/analyze-email
+POST http://127.0.0.1:8000/analyze-email
 
 Headers:
   Content-Type: application/json
@@ -156,7 +162,7 @@ Response:
 
 ### Flagged Intelligence Stats Endpoint
 ```bash
-GET https://web-production-b7ac.up.railway.app/admin/flagged-intelligence
+GET http://127.0.0.1:8000/admin/flagged-intelligence
 
 Headers:
   x-api-key: YOUR_API_KEY_HERE
@@ -269,5 +275,5 @@ MIT License - See LICENSE file for details
 **Version:** 1.0.0  
 **Last Updated:** February 21, 2026  
 **Authors:** Ayush Singh, Codex AI  
-**Backend:** Railway Deployment  
+**Backend:** Configurable local or hosted FastAPI deployment
 **Repository:** https://github.com/ayushmansingh0502-hub/HONEYPOT_API

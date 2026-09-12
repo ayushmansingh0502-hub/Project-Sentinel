@@ -4,7 +4,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from api.dependencies import verify_api_key
+from api.dependencies import verify_api_key, verify_operator_api_key
 from api.logging_utils import logfmt
 from policy import apply_action, load_playbooks
 from schemas import ActionRequest
@@ -28,7 +28,7 @@ async def playbooks(api_key: str = Depends(verify_api_key)):
 async def take_incident_action(
     incident_id: int,
     body: ActionRequest,
-    api_key: str = Depends(verify_api_key),
+    api_key: str = Depends(verify_operator_api_key),
 ):
     try:
         result = apply_action(
@@ -52,3 +52,4 @@ async def incident_audit(incident_id: int, api_key: str = Depends(verify_api_key
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
     return {"incident": incident, "audit": get_audit_log(int(incident_id))}
+

@@ -36,8 +36,89 @@ class EmailAnalysisRequest(StrictRequestModel):
     from_email: str = Field(min_length=3, max_length=320)
     from_name: Optional[str] = Field(default=None, max_length=256)
     subject: Optional[str] = Field(default=None, max_length=512)
-    message_text: str = Field(min_length=1, max_length=20000)
+    message_text: Optional[str] = Field(default=None, max_length=20000)
     links: List[str] = Field(default_factory=list, max_length=100)
+    raw_headers: Optional[str] = Field(default=None, max_length=100000)
+    raw_eml: Optional[str] = Field(default=None, max_length=2000000)
+    sender_ip: Optional[str] = Field(default=None, max_length=64)
+    spf_result: Optional[str] = Field(default=None, max_length=32)
+    dkim_result: Optional[str] = Field(default=None, max_length=32)
+    dmarc_result: Optional[str] = Field(default=None, max_length=32)
+
+    @model_validator(mode="after")
+    def validate_message_source(self) -> "EmailAnalysisRequest":
+        if not (self.message_text and self.message_text.strip()) and not self.raw_eml:
+            raise ValueError("message_text or raw_eml is required.")
+        return self
+
+
+class AuthenticationResults(BaseModel):
+    spf: Optional[str] = None
+    dkim: Optional[str] = None
+    dmarc: Optional[str] = None
+    spf_domain: Optional[str] = None
+    dkim_domain: Optional[str] = None
+    aligned: Optional[bool] = None
+
+
+class RelayHop(BaseModel):
+    position: int
+    raw: str
+    from_host: Optional[str] = None
+    by_host: Optional[str] = None
+    protocol: Optional[str] = None
+    timestamp: Optional[str] = None
+    ip_addresses: List[str] = Field(default_factory=list)
+    country: Optional[str] = None
+    city: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    is_private: bool = False
+    is_trusted_relay: bool = False
+
+
+class HeaderAnalysis(BaseModel):
+    from_domain: Optional[str] = None
+    return_path_domain: Optional[str] = None
+    reply_to_domain: Optional[str] = None
+    message_id_domain: Optional[str] = None
+    relay_hops: List[RelayHop] = Field(default_factory=list)
+    anomalies: List[str] = Field(default_factory=list)
+    authentication: AuthenticationResults = Field(default_factory=AuthenticationResults)
+
+
+class OriginTrace(BaseModel):
+    ip: Optional[str] = None
+    country: Optional[str] = None
+    city: Optional[str] = None
+    isp: Optional[str] = None
+    asn: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    is_vpn: bool = False
+    is_tor: bool = False
+    is_hosting: bool = False
+    confidence: float = 0.0
+
+
+class DomainIntelResult(BaseModel):
+    domain: Optional[str] = None
+    is_lookalike: bool = False
+    matched_brand: Optional[str] = None
+    similarity: float = 0.0
+    suspicious_tld: bool = False
+    mx_records: List[str] = Field(default_factory=list)
+    reputation_signals: List[str] = Field(default_factory=list)
+    risk_signals: List[str] = Field(default_factory=list)
+
+
+class BrandSpoofResult(BaseModel):
+    suspected: bool = False
+    display_name_match: bool = False
+    domain_lookalike: bool = False
+    authentication_failure: bool = False
+    alignment_failure: bool = False
+    matched_brand: Optional[str] = None
 
 
 class EmailIndicator(BaseModel):
@@ -52,6 +133,10 @@ class EmailAnalysisResponse(BaseModel):
     scam_type: Optional[str] = None
     reasons: List[str] = Field(default_factory=list)
     extracted_intelligence: Optional[ExtractedIntelligence] = None
+    header_analysis: Optional[HeaderAnalysis] = None
+    origin_trace: Optional[OriginTrace] = None
+    domain_intel: Optional[DomainIntelResult] = None
+    brand_spoof: Optional[BrandSpoofResult] = None
 
 
 class Evidence(StrictRequestModel):

@@ -99,6 +99,7 @@ class APIConfig:
     rate_limit_requests: int = 30
     rate_limit_window_seconds: int = 60
     cors_origins: list = field(default_factory=lambda: ["*"])
+    trusted_proxy_ips: list = field(default_factory=list)
     ws_heartbeat_seconds: float = 30.0
     max_incidents_per_page: int = 50
 
@@ -122,14 +123,41 @@ class AppConfig:
         """Load configuration from environment variables."""
         cfg = cls()
 
+        def safe_int(name: str, default: int) -> int:
+            try:
+                value = os.getenv(name)
+                return int(value.strip()) if value else default
+            except (AttributeError, ValueError):
+                return default
+
+        def safe_float(name: str, default: float) -> float:
+            try:
+                value = os.getenv(name)
+                return float(value.strip()) if value else default
+            except (AttributeError, ValueError):
+                return default
+
         # API
         cfg.api.api_key = (os.getenv("API_KEY") or "").strip()
         cfg.api.google_ai_studio_key = (os.getenv("GOOGLE_AI_STUDIO_KEY") or "").strip()
-        cfg.api.rate_limit_requests = int(os.getenv("RATE_LIMIT_REQUESTS", "30"))
-        cfg.api.rate_limit_window_seconds = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
+        cfg.api.rate_limit_requests = max(1, safe_int("RATE_LIMIT_REQUESTS", 30))
+        cfg.api.rate_limit_window_seconds = max(1, safe_int("RATE_LIMIT_WINDOW_SECONDS", 60))
+        cfg.api.cors_origins = [
+            origin.strip()
+            for origin in os.getenv(
+                "CORS_ORIGINS",
+                "http://localhost:8000,http://127.0.0.1:8000,https://mail.google.com,https://www.gmail.com",
+            ).split(",")
+            if origin.strip()
+        ]
+        cfg.api.trusted_proxy_ips = [
+            address.strip()
+            for address in os.getenv("TRUSTED_PROXY_IPS", "").split(",")
+            if address.strip()
+        ]
 
         # Graph
-        cfg.graph.decay_rate = float(os.getenv("GRAPH_DECAY_RATE", "0.95"))
+        cfg.graph.decay_rate = min(1.0, max(0.01, safe_float("GRAPH_DECAY_RATE", 0.95)))
         cfg.graph.backend = os.getenv("GRAPH_BACKEND", "memory")
 
         # Environment
@@ -138,8 +166,8 @@ class AppConfig:
         cfg.redis_url = os.getenv("REDIS_URL")
 
         # Correlation
-        cfg.correlation.window_seconds = float(os.getenv("CORRELATION_WINDOW", "300"))
-        cfg.correlation.create_threshold = float(os.getenv("CORRELATION_THRESHOLD", "60"))
+        cfg.correlation.window_seconds = max(10.0, safe_float("CORRELATION_WINDOW", 300.0))
+        cfg.correlation.create_threshold = min(100.0, max(1.0, safe_float("CORRELATION_THRESHOLD", 60.0)))
 
         return cfg
 
@@ -153,6 +181,17 @@ class AppConfig:
             raise ConfigError("GOOGLE_AI_STUDIO_KEY contains a placeholder value.")
         if self.redis_url and _is_placeholder_secret(self.redis_url):
             raise ConfigError("REDIS_URL contains placeholder credentials.")
+        if (
+            self.environment == "production"
+            and self.redis_url
+            and "@" not in self.redis_url
+            and os.getenv("REDIS_ALLOW_NO_AUTH", "").lower() != "true"
+        ):
+            raise ConfigError("REDIS_URL has no credentials and ENVIRONMENT=production. Set a password or explicitly allow this via REDIS_ALLOW_NO_AUTH=true.")
+        if self.environment == "production" and (os.getenv("REQUIRE_REDIS_IN_PRODUCTION", "").lower() == "true" or self.graph.backend == "redis"):
+            import storage
+            if not storage._redis_available():
+                raise ConfigError("Production environment requires a connected Redis instance.")
         return self
 
     def to_dict(self) -> dict:

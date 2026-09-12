@@ -14,6 +14,15 @@ let lastEmailData = null;
 let lastBannerState = { type: 'pending', message: 'Analyzing email…' };
 let observer = null;
 let observerTarget = null;
+let analysisInFlight = false;
+let lastAnalysisKey = '';
+let lastScanAttemptAt = 0;
+
+function getEmailAnalysisKey(emailData) {
+  const container = getEmailContentContainer();
+  const messageId = container?.getAttribute('data-message-id') || '';
+  return [messageId, emailData.from_email, emailData.subject, emailData.message_text.slice(0, 240)].join('|');
+}
 
 /**
  * Extract email data from Gmail DOM
@@ -24,14 +33,9 @@ function extractEmailData() {
     const emailContainer = getEmailContentContainer();
     
     // Gmail HTML structure (may vary)
-    const fromElement = document.querySelector('[data-email]');
-    const fromEmail = fromElement?.getAttribute('data-email') || 
-                      document.querySelector('[data-tooltip*="@"]')?.textContent || 
-                      '';
-    
-    const fromName = document.querySelector('[email]')?.textContent || 
-                     document.querySelector('[data-name]')?.textContent || 
-                     '';
+    const sender = extractSenderIdentity();
+    const fromEmail = sender.email;
+    const fromName = sender.name;
     
     const subject = document.querySelector('[data-subject]')?.textContent ||
                     document.title.split(' - ')[0] ||
@@ -39,23 +43,17 @@ function extractEmailData() {
     
     // Extract text ONLY from email container, not entire page
     let messageText = '';
-    if (emailContainer) {
-      messageText = emailContainer.innerText;
-    } else {
-      messageText = document.body.innerText;
+    if (!emailContainer) {
+      console.warn("⚠️ Email container unavailable; waiting instead of scanning the whole Gmail page");
+      return null;
     }
+    messageText = emailContainer.innerText;
     
     // Extract links - prioritize email container
     let links = [];
-    if (emailContainer) {
-      links = Array.from(emailContainer.querySelectorAll('a'))
-        .map(a => a.href)
-        .filter(href => href.startsWith('http'));
-    } else {
-      links = Array.from(document.querySelectorAll('a'))
-        .map(a => a.href)
-        .filter(href => href.startsWith('http'));
-    }
+    links = Array.from(emailContainer.querySelectorAll('a'))
+      .map(a => a.href)
+      .filter(href => href.startsWith('http'));
     
     return {
       from_email: fromEmail,
@@ -70,13 +68,54 @@ function extractEmailData() {
   }
 }
 
+function extractSenderIdentity() {
+  const emailPattern = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+  const selectors = [
+    '[email*="@"]',
+    '[data-email*="@"]',
+    '[data-hovercard-id^="mailto:"]',
+    '[data-hovercard-id*="@"]',
+    '[data-tooltip*="@"]',
+    '[aria-label*="@"]'
+  ];
+
+  for (const selector of selectors) {
+    for (const element of document.querySelectorAll(selector)) {
+      const candidates = [
+        element.getAttribute('email'),
+        element.getAttribute('data-email'),
+        element.getAttribute('data-hovercard-id'),
+        element.getAttribute('data-tooltip'),
+        element.getAttribute('aria-label'),
+        element.textContent
+      ].filter(Boolean);
+      const match = candidates.map(value => value.match(emailPattern)).find(Boolean);
+      if (match) {
+        return {
+          email: match[0].toLowerCase(),
+          name: (element.textContent || '').replace(match[0], '').trim() || ''
+        };
+      }
+    }
+  }
+
+  console.warn('No sender email address found in the Gmail message header');
+  return { email: '', name: '' };
+}
+
 /**
  * Send email for analysis
  */
 async function analyzeCurrentEmail() {
+  if (analysisInFlight) return;
   const emailData = extractEmailData();
   
-  console.log("📧 Email data extracted:", emailData);
+  console.log("📧 Email data extracted:", emailData ? {
+    sender_present: Boolean(emailData.from_email),
+    subject_present: Boolean(emailData.subject),
+    message_length: emailData.message_text.length,
+    link_count: emailData.links.length
+  } : null);
   
   if (!emailData || !emailData.message_text) {
     console.log("⚠️ No email content found to analyze");
@@ -84,9 +123,19 @@ async function analyzeCurrentEmail() {
     return;
   }
 
+  const analysisKey = getEmailAnalysisKey(emailData);
+  const now = Date.now();
+  if (analysisKey === lastAnalysisKey && now - lastScanAttemptAt < 10000) return;
+  lastAnalysisKey = analysisKey;
+  lastScanAttemptAt = now;
+  analysisInFlight = true;
+
   showPendingBanner("Analyzing email…");
   
-  console.log("📧 Analyzing email from:", emailData.from_email, "Subject:", emailData.subject);
+  console.log("📧 Analyzing email", {
+    sender_present: Boolean(emailData.from_email),
+    subject_present: Boolean(emailData.subject),
+  });
   console.log("📝 Message length:", emailData.message_text.length, "Links found:", emailData.links.length);
   
   // Send to background script
@@ -96,13 +145,36 @@ async function analyzeCurrentEmail() {
       data: emailData
     },
     (response) => {
-      console.log("📨 Response from background:", response);
-      if (response.success) {
-        console.log("✅ Analysis successful:", response.data);
-        showAnalysisResult(response.data, emailData);
-      } else {
-        console.error("❌ Analysis failed:", response.error);
-        showError(response.error);
+      try {
+        console.log("📨 Response from background:", response);
+        if (chrome.runtime.lastError) {
+          console.error("❌ Background communication failed:", chrome.runtime.lastError.message);
+          showError(`Extension background error: ${chrome.runtime.lastError.message}`);
+          return;
+        }
+        if (!response) {
+          showError("The extension background service did not respond. Reload the extension and try again.");
+          return;
+        }
+        if (response.success) {
+          console.log("✅ Analysis successful", {
+            is_scam: response.data?.is_scam,
+            risk_score: response.data?.risk?.risk_score,
+            risk_level: response.data?.risk?.risk_level
+          });
+          showAnalysisResult(response.data, emailData);
+        } else {
+          console.error("❌ Analysis failed:", response.error);
+          showError(response.error);
+        }
+      } catch (error) {
+        console.error("❌ Could not render analysis result:", error);
+        showError(`Could not display analysis result: ${error.message}`);
+      } finally {
+        analysisInFlight = false;
+        if (!lastAnalysis || lastBannerState.type === 'error') {
+          lastAnalysisKey = '';
+        }
       }
     }
   );
@@ -153,29 +225,13 @@ function showPendingBanner(message) {
  * Insert banner into Gmail thread or main content
  */
 function insertAnalysisBanner(banner) {
-  const emailContainer = document.querySelector('[data-thread-id]');
-  if (emailContainer) {
-    const existingBanner = emailContainer.querySelector('.scam-shield-banner');
-    if (existingBanner) existingBanner.remove();
-    emailContainer.insertBefore(banner, emailContainer.firstChild);
-    console.log("✅ Banner inserted in thread container");
-    return;
-  }
-
-  const mainContent = document.querySelector('[role="main"]');
-  if (mainContent) {
-    const existingBanner = mainContent.querySelector('.scam-shield-banner');
-    if (existingBanner) existingBanner.remove();
-    mainContent.insertBefore(banner, mainContent.firstChild);
-    console.log("✅ Banner inserted in main content");
-    return;
-  }
-
+  // Gmail frequently replaces thread nodes. Keep our status in a stable host.
   const fixedHost = getOrCreateFixedBannerHost();
-  const existingBanner = fixedHost.querySelector('.scam-shield-banner');
-  if (existingBanner) existingBanner.remove();
+  document.querySelectorAll('.scam-shield-banner').forEach(existing => {
+    if (existing !== banner) existing.remove();
+  });
   fixedHost.prepend(banner);
-  console.log("✅ Banner inserted in fixed host");
+  console.log("✅ Banner inserted in stable host");
 }
 
 /**
@@ -236,13 +292,13 @@ function createStatusBanner({ title, message, icon, color, bgColor, borderColor 
       line-height: 1.5;
     ">
       <div style="display: flex; gap: 8px; align-items: flex-start;">
-        <span style="font-size: 18px; flex-shrink: 0;">${icon}</span>
+        <span style="font-size: 18px; flex-shrink: 0;">${escapeHtml(icon)}</span>
         <div style="flex: 1;">
-          <div style="font-weight: 600; color: ${color}; margin-bottom: 4px;">
-            ${title}
+          <div style="font-weight: 600; color: ${escapeHtml(color)}; margin-bottom: 4px;">
+            ${escapeHtml(title)}
           </div>
           <div style="color: #555; font-size: 12px;">
-            ${message}
+            ${escapeHtml(message)}
           </div>
         </div>
       </div>
@@ -277,8 +333,8 @@ function createAnalysisBanner(analysis) {
   const banner = document.createElement('div');
   banner.className = 'scam-shield-banner';
   
-  const riskLevel = analysis.risk?.risk_level || 'unknown';
-  const riskScore = analysis.risk?.risk_score || 0;
+  const riskLevel = analysis.risk?.risk_level || analysis.risk?.level || 'unknown';
+  const riskScore = analysis.risk?.risk_score ?? analysis.risk?.score ?? analysis.risk_score ?? 'N/A';
   const bgColor = analysis.is_scam ? '#fee' : '#efe';
   const borderColor = analysis.is_scam ? '#c33' : '#3a3';
   const icon = analysis.is_scam ? '⚠️' : '✅';
@@ -303,7 +359,7 @@ function createAnalysisBanner(analysis) {
           
           ${analysis.reasons && analysis.reasons.length > 0 ? `
             <div style="color: #555; font-size: 12px; margin-bottom: 4px;">
-              ${analysis.reasons.join(' • ')}
+              ${analysis.reasons.map(escapeHtml).join(' • ')}
             </div>
           ` : ''}
           
@@ -314,13 +370,13 @@ function createAnalysisBanner(analysis) {
           
           ${analysis.extracted_intelligence?.upi_ids?.length > 0 ? `
             <div style="color: #c33; font-size: 12px; margin-top: 4px;">
-              🚨 Found UPI IDs: ${analysis.extracted_intelligence.upi_ids.join(', ')}
+              🚨 Found UPI IDs: ${analysis.extracted_intelligence.upi_ids.map(escapeHtml).join(', ')}
             </div>
           ` : ''}
           
           ${analysis.extracted_intelligence?.phishing_links?.length > 0 ? `
             <div style="color: #c33; font-size: 12px; margin-top: 4px;">
-              🔗 Found suspicious links: ${analysis.extracted_intelligence.phishing_links.slice(0, 2).join(', ')}
+              🔗 Found suspicious links: ${analysis.extracted_intelligence.phishing_links.slice(0, 2).map(escapeHtml).join(', ')}
             </div>
           ` : ''}
         </div>
@@ -454,24 +510,34 @@ function highlightText(texts, bgColor, textColor, container) {
   
   console.log("📊 Processing", nodesToProcess.length, "nodes for highlighting");
   
-  // Replace nodes with highlighted versions
+  // Replace matching text nodes with safe DOM nodes; never inject email text as HTML.
   const processed = new Set();
   nodesToProcess.forEach(({ node, text }) => {
     if (processed.has(node)) return; // Skip if already processed
     processed.add(node);
     
-    try {
-      const regex = new RegExp(`(${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-      const span = document.createElement('span');
-      span.innerHTML = node.textContent.replace(regex, 
-        `<span class="scam-shield-highlight" style="background: ${bgColor}; color: ${textColor}; font-weight: bold; padding: 2px 4px; border-radius: 2px;">$1</span>`
-      );
-      node.parentNode.replaceChild(span, node);
-      console.log("✅ Highlighted:", text);
-    } catch (e) {
-      console.error("❌ Error highlighting:", text, e);
+    const regex = new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    const fragment = document.createDocumentFragment();
+    let lastIndex = 0;
+    let match;
+    while ((match = regex.exec(node.textContent)) !== null) {
+      fragment.appendChild(document.createTextNode(node.textContent.slice(lastIndex, match.index)));
+      const highlight = document.createElement('span');
+      highlight.className = 'scam-shield-highlight';
+      highlight.style.cssText = `background: ${bgColor}; color: ${textColor}; font-weight: bold; padding: 2px 4px; border-radius: 2px;`;
+      highlight.textContent = match[0];
+      fragment.appendChild(highlight);
+      lastIndex = match.index + match[0].length;
     }
+    fragment.appendChild(document.createTextNode(node.textContent.slice(lastIndex)));
+    node.parentNode.replaceChild(fragment, node);
   });
+}
+
+function escapeHtml(value) {
+  const element = document.createElement('div');
+  element.textContent = String(value ?? '');
+  return element.innerHTML;
 }
 
 /**
@@ -497,10 +563,6 @@ function debouncedAnalyze() {
 function setupObservers() {
   if (!observer) {
     observer = new MutationObserver(() => {
-      if (CONFIG.autoAnalyze) {
-        debouncedAnalyze();
-      }
-
       ensureBannerVisible();
       attachObserver();
     });
@@ -510,7 +572,18 @@ function setupObservers() {
 
   // Retry attachment while Gmail hydrates
   setInterval(attachObserver, 2000);
+  setInterval(() => {
+    if (!CONFIG.autoAnalyze || analysisInFlight) return;
+    const emailData = extractEmailData();
+    if (!emailData?.message_text) return;
+    const key = getEmailAnalysisKey(emailData);
+    if (key !== lastAnalysisKey) debouncedAnalyze();
+  }, 2000);
 }
+
+chrome.storage.sync.get(['autoAnalyze'], (items) => {
+  CONFIG.autoAnalyze = items.autoAnalyze !== false;
+});
 
 function attachObserver() {
   const target =

@@ -13,6 +13,10 @@ from api.logging_utils import logfmt
 
 logger = logging.getLogger("honeypot_api")
 
+MAX_LIVE_WS_CONNECTIONS_GLOBAL = 100
+MAX_LIVE_WS_CONNECTIONS_PER_IP = 5
+MAX_LIVE_WS_MESSAGE_BYTES = 64 * 1024
+
 
 @dataclass
 class APIMetrics:
@@ -75,15 +79,30 @@ class ConnectionManager:
 
     def __init__(self) -> None:
         self.active_connections: List[WebSocket] = []
+        self.ip_connections: Dict[str, int] = {}
 
-    async def connect(self, websocket: WebSocket) -> None:
+    async def connect(self, websocket: WebSocket) -> bool:
+        client_ip = websocket.client.host if websocket.client else "unknown"
+        if len(self.active_connections) >= MAX_LIVE_WS_CONNECTIONS_GLOBAL:
+            await websocket.close(code=1008, reason="Global connection limit reached")
+            return False
+        if self.ip_connections.get(client_ip, 0) >= MAX_LIVE_WS_CONNECTIONS_PER_IP:
+            await websocket.close(code=1008, reason="Per-IP connection limit reached")
+            return False
         await websocket.accept()
         self.active_connections.append(websocket)
+        self.ip_connections[client_ip] = self.ip_connections.get(client_ip, 0) + 1
         logger.info(logfmt("websocket_connect", connections=len(self.active_connections)))
+        return True
 
     def disconnect(self, websocket: WebSocket) -> None:
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
+        client_ip = websocket.client.host if websocket.client else "unknown"
+        if client_ip in self.ip_connections:
+            self.ip_connections[client_ip] -= 1
+            if self.ip_connections[client_ip] <= 0:
+                del self.ip_connections[client_ip]
         logger.info(logfmt("websocket_disconnect", connections=len(self.active_connections)))
 
     async def broadcast(self, message: dict, metrics: APIMetrics) -> None:
@@ -120,3 +139,4 @@ class RuntimeState:
 
 
 runtime_state = RuntimeState()
+
