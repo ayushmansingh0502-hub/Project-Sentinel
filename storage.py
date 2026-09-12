@@ -7,8 +7,11 @@ import time
 from typing import Dict, List, Optional
 
 import redis
+import redis.backoff
+import redis.retry
 
 from api.logging_utils import logfmt
+from forensic.report_models import EvidenceMetadata
 from lifecycle import ScamPhase
 
 logger = logging.getLogger("honeypot.storage")
@@ -20,6 +23,8 @@ _flagged_phishing_links: set[str] = set()
 _pheromones: dict[str, dict] = {}
 _incidents: dict[int, dict] = {}
 _audit_logs: dict[int, list] = {}
+_evidence_store: dict[str, dict] = {}
+_email_analysis_store: dict[str, dict] = {}
 _next_incident_id = 1
 
 _REDIS_KEYS = {
@@ -32,15 +37,28 @@ _REDIS_KEYS = {
 }
 
 
+def _is_placeholder_url(url: Optional[str]) -> bool:
+    return bool(url and ("YOUR_UPSTASH" in url or "YOUR_API_KEY" in url))
+
+
+_no_retry = redis.retry.Retry(redis.backoff.NoBackoff(), 0)
+
+
 def _build_redis_client():
     redis_url = os.getenv("REDIS_URL")
-    if redis_url:
-        return redis.Redis.from_url(redis_url, decode_responses=True)
+    options = {
+        "decode_responses": True,
+        "socket_connect_timeout": 0.2,
+        "socket_timeout": 0.2,
+        "retry": _no_retry,
+    }
+    if redis_url and not _is_placeholder_url(redis_url):
+        return redis.Redis.from_url(redis_url, **options)
     return redis.Redis(
         host=os.getenv("REDIS_HOST", "localhost"),
         port=int(os.getenv("REDIS_PORT", "6379")),
         password=os.getenv("REDIS_PASSWORD"),
-        decode_responses=True,
+        **options,
     )
 
 
@@ -246,6 +264,60 @@ def get_incident(incident_id: int) -> Optional[dict]:
         return _load_json(redis_client.get(f"incident:{incident_id}"), None)
     return _incidents.get(int(incident_id))
 
+def save_evidence_metadata(email_id: str, evidence: EvidenceMetadata) -> None:
+    """Persist forensic evidence metadata using the active storage backend."""
+    payload = evidence.model_dump(mode="json")
+    if _redis_available():
+        key = f"email:{email_id}:evidence"
+        redis_client.set(key, json.dumps(payload))
+        _REDIS_KEYS.add(key)
+    else:
+        _evidence_store[email_id] = payload
+
+
+async def save_evidence_metadata_async(email_id: str, evidence: EvidenceMetadata) -> None:
+    save_evidence_metadata(email_id, evidence)
+
+
+def get_evidence_metadata(email_id: str) -> Optional[EvidenceMetadata]:
+    raw = redis_client.get(f"email:{email_id}:evidence") if _redis_available() else None
+    data = json.loads(raw) if raw else _evidence_store.get(email_id)
+    return EvidenceMetadata.model_validate(data) if data else None
+
+
+async def get_evidence_metadata_async(email_id: str) -> Optional[EvidenceMetadata]:
+    return get_evidence_metadata(email_id)
+
+
+def save_email_analysis(email_id: str, analysis: dict) -> None:
+    if _redis_available():
+        key = f"email:{email_id}:analysis"
+        redis_client.set(key, json.dumps(analysis, default=str))
+        _REDIS_KEYS.add(key)
+    else:
+        _email_analysis_store[email_id] = analysis
+
+
+async def save_email_analysis_async(email_id: str, analysis: dict) -> None:
+    save_email_analysis(email_id, analysis)
+
+
+def get_email_analysis(email_id: str):
+    raw = redis_client.get(f"email:{email_id}:analysis") if _redis_available() else None
+    return json.loads(raw) if raw else _email_analysis_store.get(email_id)
+
+
+async def get_email_analysis_async(email_id: str):
+    return get_email_analysis(email_id)
+
+
+def log_report_generation(event_type: str, email_id: str, actor: str, report_id: str) -> dict:
+    event = {"event_type": event_type, "email_id": email_id, "actor": actor, "report_id": report_id, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    if _redis_available():
+        redis_client.lpush("audit:report", json.dumps(event))
+    else:
+        _audit_logs.setdefault(-1, []).append(event)
+    return event
 
 def list_incidents() -> list:
     if _redis_available():
@@ -316,6 +388,8 @@ def reset_runtime_state(clear_redis: bool = False):
     _pheromones.clear()
     _incidents.clear()
     _audit_logs.clear()
+    _evidence_store.clear()
+    _email_analysis_store.clear()
     _next_incident_id = 1
 
     redis_cleared = False

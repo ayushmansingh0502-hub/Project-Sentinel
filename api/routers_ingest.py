@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import ValidationError
 
-from api.dependencies import verify_api_key
+from api.dependencies import is_rate_limited, verify_api_key
 from api.logging_utils import logfmt
 from api.runtime import runtime_state
 from event_queue import event_queue
@@ -43,14 +44,25 @@ async def ingest_telemetry(
 
 @router.post("/ingest/json", status_code=202)
 async def ingest_json(
+    request: Request,
     body: JSONIngestRequest,
     api_key: str = Depends(verify_api_key),
 ):
+    client_ip = request.client.host if request.client else "unknown"
+    if is_rate_limited(client_ip):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded.")
     event = ingestion_engine.ingest_json(body.root)
     if not event:
         runtime_state.metrics.record_ingest("json", success=False)
         logger.warning(logfmt("json_ingest_unparseable"))
         raise HTTPException(status_code=422, detail="Could not parse event")
+
+    try:
+        event = TelemetryEvent.model_validate(event).model_dump()
+    except ValidationError as exc:
+        runtime_state.metrics.record_ingest("json", success=False)
+        logger.warning(logfmt("json_ingest_invalid_normalized_event"))
+        raise HTTPException(status_code=422, detail="Normalized event failed validation.") from exc
 
     accepted = await event_queue.enqueue(event)
     runtime_state.metrics.record_ingest("json", success=accepted)
@@ -107,3 +119,4 @@ async def ingest_csv(
     runtime_state.metrics.record_ingest("csv", success=True)
     logger.info(logfmt("csv_ingest_enqueued", event_count=len(events), enqueued=enqueued))
     return {"status": "accepted", "enqueued": enqueued, "queue_depth": event_queue.metrics.depth}
+

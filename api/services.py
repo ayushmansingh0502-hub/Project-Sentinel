@@ -375,3 +375,4 @@ def serve_dashboard_response(dashboard_dir: str):
     if os.path.exists(dashboard_path):
         return FileResponse(dashboard_path, media_type="text/html")
     return HTMLResponse(content="<h1>Dashboard not found. Create dashboard/index.html</h1>", status_code=404)
+

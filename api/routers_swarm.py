@@ -4,7 +4,7 @@ import logging
 
 from fastapi import APIRouter, Depends, Query
 
-from api.dependencies import verify_api_key
+from api.dependencies import verify_api_key, verify_operator_api_key
 from api.logging_utils import logfmt
 from api.runtime import runtime_state
 from api.services import broadcast_message, control_simulation_service, reset_runtime_state, start_swarm_service, stop_swarm_service
@@ -21,20 +21,20 @@ logger = logging.getLogger("honeypot_api")
 @router.post("/containment/action")
 async def containment_action(
     body: ContainmentActionRequest,
-    api_key: str = Depends(verify_api_key),
+    api_key: str = Depends(verify_operator_api_key),
 ):
     result = containment_engine.execute_action(
         action=body.action,
         entity_id=body.entity_id,
         entity_type=body.entity_type,
-        actor="authenticated_api",
+        actor=body.actor,
         reason=body.reason,
         incident_id=body.incident_id,
         ttl_seconds=body.ttl_seconds,
     )
     if result.get("status") != "ok":
         runtime_state.metrics.containment_failures += 1
-        logger.warning(logfmt("containment_action_failed", action=body.action, entity_id=body.entity_id, result=result))
+        logger.warning(logfmt("containment_action_failed", action=body.action, entity_id=body.entity_id, status=result.get("status")))
         return result
 
     runtime_state.metrics.containment_actions += 1
@@ -92,23 +92,24 @@ async def list_scenarios(api_key: str = Depends(verify_api_key)):
 
 
 @router.post("/swarm/reset")
-async def reset_swarm(api_key: str = Depends(verify_api_key)):
+async def reset_swarm(api_key: str = Depends(verify_operator_api_key)):
     return await reset_runtime_state()
 
 
 @router.post("/swarm/simulate")
 async def control_simulation(
     body: SimulationControl,
-    api_key: str = Depends(verify_api_key),
+    api_key: str = Depends(verify_operator_api_key),
 ):
     return await control_simulation_service(body.action, body.scenario or "apt_killchain", body.events_per_second)
 
 
 @router.post("/swarm/start")
-async def start_swarm(api_key: str = Depends(verify_api_key)):
+async def start_swarm(api_key: str = Depends(verify_operator_api_key)):
     return await start_swarm_service()
 
 
 @router.post("/swarm/stop")
-async def stop_swarm(api_key: str = Depends(verify_api_key)):
+async def stop_swarm(api_key: str = Depends(verify_operator_api_key)):
     return await stop_swarm_service()
+
